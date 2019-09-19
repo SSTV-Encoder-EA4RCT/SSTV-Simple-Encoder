@@ -1,0 +1,246 @@
+#include "Arduino.h"
+#include "pic.h"
+#include <SPI.h>
+#include <SD.h>
+
+#define COLORCORRECTION 3.1372549
+
+// Scottie 1 mode (time in ms)
+#define COLORSCANTIME 138.240
+#define SEPARATORPULSETIME 1.5
+#define SEPARATORPULSEFREQ 1500
+#define SYNCPULSETIME 9
+#define SYNCPULSEFREQ 1200
+
+#define BUZZPIN 9
+
+// Sd consts
+#define SDSLAVE 4
+#define SDCLOCK 13
+#define SDMOSI 11
+#define SDMISO 12
+
+String path = "e.txt";
+
+File myFile;      // File
+byte buff[3];     // File read buffer
+
+
+byte buffR[320]; // Buffer conintating Red values of the line
+byte buffG[320]; // Buffer conintating Green values of the line
+byte buffB[320]; // Buffer conintating Blue values of the line
+
+uint16_t playPixel(long pixel);
+uint16_t freq(uint8_t c);
+void calibrationHeader();
+void startingSyncPulse();
+void transmit(int freq, int duration);
+void openFile();
+void playPixel(uint8_t r, uint8_t g, uint8_t b);
+
+void setup() {
+  delay(5000);
+  Serial.begin(9600);
+  //transmit(1900,300);
+
+
+  // Sd initialize
+  Serial.print("Initializing SD card...");
+  if (!SD.begin(SDSLAVE)) {
+    Serial.println("initialization failed!");
+    while (1);
+  }
+  Serial.println("initialization done.");
+
+
+
+
+  // re-open the file for reading:
+  myFile = SD.open(path);
+  if (myFile) {
+    Serial.println("test.txt:");
+
+    /** VOX TONE (OPTIONAL) **/
+    transmit(1900, 100);
+    transmit(1500, 100);
+    transmit(1900, 100);
+    transmit(1500, 100);
+    transmit(2300, 100);
+    transmit(1500, 100);
+    transmit(2300, 100);
+    transmit(1500, 100);
+
+    /** CALIBRATION HEADER **/
+
+    transmit(1900, 300);
+    transmit(1200, 10);
+    transmit(1900, 300);
+    transmit(1200, 30);
+    transmit(1300, 30);    // 0
+    transmit(1300, 30);    // 0
+    transmit(1100, 30);    // 1
+    transmit(1100, 30);    // 1
+    transmit(1100, 30);    // 1
+    transmit(1100, 30);    // 1
+    transmit(1300, 30);    // 0
+    transmit(1300, 30);    // Even parity
+    transmit(1200, 30);    // VIS stop bit
+
+    /** STARTING SYNC PULSO (FIRST LINE ONLY)  **/
+
+    transmit(1200, 9);
+
+    /** TRANSMIT EACH LINE **/
+    while(myFile.available()){
+
+      // Read line and store color values in the buffer
+      for(uint16_t i = 0; i < 320; i++){
+        buffR[i] = myFile.read();
+        buffG[i] = myFile.read();
+        buffB[i] = myFile.read();
+      }
+
+      // Separator pulse
+      transmit(1500, 1.5);
+
+      // Green Scan
+      for(uint16_t i = 0; i < 320; i++){
+        transmit(1500 + 3.1372549 * buffG[i], 0.4320);    // .4320ms/pixel
+      }
+
+      // Separator Pulse
+      transmit(1500, 1.5);
+
+      // Blue Scan
+      for(uint16_t i = 0; i < 320; i++){
+        transmit(1500 + 3.1372549 * buffB[i], 0.4320);    // .4320ms/pixel
+      }
+
+      // Sync Pulse
+      transmit(1200, 9);
+
+      // Sync porch
+      transmit(1500, 1.5);
+
+      // Red Scan
+      for(uint16_t i = 0; i < 320; i++){
+        transmit(1500 + 3.1372549 * buffR[i], 0.4320);    // .4320ms/pixel
+      }
+    }
+
+    // close the file:
+    myFile.close();
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+  }
+}
+
+void loop() {
+
+  /*
+  calibrationHeader();
+
+  startingSyncPulse();
+
+  for(int i = 0; i < 10000; i++){
+    playPixel(qbert[i]);
+  }
+
+  delay(10000);
+
+  */
+}
+
+
+void transmit(int freq, int duration){
+  tone(BUZZPIN, freq, duration);
+  delay(duration);
+}
+
+void encoder(){
+
+}
+
+void startingSyncPulse(){
+  transmit(SYNCPULSEFREQ, SYNCPULSETIME);
+}
+
+void playPixel(uint8_t r, uint8_t g, uint8_t b){
+  // Separator pulse
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Green Scan
+  transmit(freq(g), COLORSCANTIME);
+
+  // Separator Pulse
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Blue Scan
+  transmit(freq(b), COLORSCANTIME);
+
+  // Sync Pulse
+  transmit(SYNCPULSEFREQ, SYNCPULSETIME);
+
+  // Sync porch
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Red Scan
+  transmit(freq(r), COLORSCANTIME);
+}
+
+uint16_t playPixel(long pixel){
+  uint8_t r = pixel & 0xFF0000 >> 16;
+  uint8_t g = pixel & 0x00FF00 >> 8;
+  uint8_t b = pixel & 0x0000FF;
+
+  // Separator pulse
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Green Scan
+  transmit(freq(g), COLORSCANTIME);
+
+  // Separator Pulse
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Blue Scan
+  transmit(freq(b), COLORSCANTIME);
+
+  // Sync Pulse
+  transmit(SYNCPULSEFREQ, SYNCPULSETIME);
+
+  // Sync porch
+  transmit(SEPARATORPULSEFREQ, SEPARATORPULSETIME);
+
+  // Red Scan
+  transmit(freq(r), COLORSCANTIME);
+}
+
+/**
+ * Get output frequency given a color component (R, G, B) from 0 to 255
+**/
+uint16_t freq(uint8_t c){
+  return 1500 + (c * COLORCORRECTION);
+}
+
+void calibrationHeader(){
+  // Leader tone
+
+  //transmit(1200, 9);
+
+  transmit(1900, 300);
+  transmit(1200, 10);
+  transmit(1900, 300);
+  transmit(1200, 30);
+  transmit(1300, 30);    // 0
+  transmit(1300, 30);    // 0
+  transmit(1100, 30);    // 1
+  transmit(1100, 30);    // 1
+  transmit(1100, 30);    // 1
+  transmit(1100, 30);    // 1
+  transmit(1300, 30);    // 0
+  transmit(1300, 30);    // Even parity
+  transmit(1200, 30);    // VIS stop bit
+
+
+}
